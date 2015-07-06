@@ -479,9 +479,30 @@ matchfile(char *filestart) {
 	filestart[ p ] = '*';
 
 	wordexp(filestart, &exp, 0);
-		for(j=0,i=0; exp.we_wordv[0][i]!=0; i++,j++) {
-			if( exp.we_wordv[0][i]==' ' ) filestart[j++]='\\';
-			filestart[j]=exp.we_wordv[0][i];
+	size_t hits = exp.we_wordc;
+
+	if( exp.we_wordc > 0 ) {
+		/* ignore matches with stars in it */
+		int exp_num = 0;
+		for(i=0; i<exp.we_wordc; i++) {
+			if(strchr(exp.we_wordv[i], '*')!=NULL) {
+				exp_num++;
+				hits = hits-1;
+			}
+		}
+
+		/* remove tailing star */
+		if(filestart[p] =='*') {
+			filestart[p]='\0';
+			star_ocurred = 1;
+		}
+
+		/* return if there are no more matches */
+		if(exp_num >= exp.we_wordc) return;
+
+		for(j=0,i=0; exp.we_wordv[exp_num][i]!=0; i++,j++) {
+			if( exp.we_wordv[exp_num][i]==' ' ) filestart[j++]='\\';
+			filestart[j]=exp.we_wordv[exp_num][i];
 		}
 		filestart[j]=0;
 
@@ -493,6 +514,13 @@ matchfile(char *filestart) {
 					break;
 				}
 			}
+
+		/* add tailing slash if file matches were found */
+		if(hits == 1 && filestart[j-1]!='/' && star_ocurred) {
+			filestart[j]='/';
+			filestart[j+1]='\0';
+		}
+
 	} else {
 		filestart[ p ] = 0;
 	}
