@@ -378,8 +378,12 @@ keypress(XKeyEvent *ev) {
 		break;
 	case XK_Tab:
 		if( strchr(text, ' ')!=NULL ) {
+			FILE *f=fopen("/tmp/dmenu.log", "a");
+			fprintf(f,"input: %s\n", text);
 			matchfile( strchr(text, ' ')+1 );
+			fprintf(f, "completed input: %s\n", text);
 			cursor = strlen(text);
+			fclose(f);
 			break;
 		}
 		if(!sel)
@@ -481,15 +485,23 @@ matchfile(char *filestart) {
 	wordexp(filestart, &exp, 0);
 	size_t hits = exp.we_wordc;
 
+	/* debug output */
+	FILE *f=fopen("/tmp/dmenu.log", "a");
+	fprintf(f, "wordc: %zu\n", exp.we_wordc);
+	fprintf(f, "hits: %zu\n", hits);
+	fprintf(f, "matches:\n");
+
 	if( exp.we_wordc > 0 ) {
 		/* ignore matches with stars in it */
 		int exp_num = 0;
 		for(i=0; i<exp.we_wordc; i++) {
+			fprintf(f, "- %s\n", exp.we_wordv[i]);
 			if(strchr(exp.we_wordv[i], '*')!=NULL) {
 				exp_num++;
 				hits = hits-1;
 			}
 		}
+		fprintf(f, "Chose %s as completion.\n\n", exp.we_wordv[exp_num]);
 
 		/* remove tailing star */
 		if(filestart[p] =='*') {
@@ -525,6 +537,7 @@ matchfile(char *filestart) {
 		filestart[ p ] = 0;
 	}
 	wordfree(&exp);
+	fclose(f);
 }
 
 void
