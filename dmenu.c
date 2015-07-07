@@ -492,16 +492,42 @@ matchfile(char *filestart) {
 	fprintf(f, "matches:\n");
 
 	if( exp.we_wordc > 0 ) {
-		/* ignore matches with stars in it */
+		/* ignore matches containing stars */
 		int exp_num = 0;
+		size_t size = 0;
+		int m = 0;
 		for(i=0; i<exp.we_wordc; i++) {
-			fprintf(f, "- %s\n", exp.we_wordv[i]);
 			if(strchr(exp.we_wordv[i], '*')!=NULL) {
 				exp_num++;
 				hits = hits-1;
+			} else {
+				fprintf(f, "- %s\n", exp.we_wordv[i]);
+
+				/* add match as item */
+				if(m+1 >= size / sizeof *items)
+					if(!(items = realloc(items, (size += BUFSIZ))))
+						fprintf(f, "cannot realloc %zu bytes:", size);
+				if(!(items[m].text = strdup(exp.we_wordv[i])))
+					fprintf(f, "cannot strdup %zu bytes:", strlen(exp.we_wordv[i])+1);
+				/* show only last relevant part of path */
+				memmove(items[m].text, strrchr(items[m].text, '/')+1, strlen(items[m].text));
+				m++;
 			}
 		}
+		if(items)
+			items[m].text = NULL;
+
 		fprintf(f, "Chose %s as completion.\n\n", exp.we_wordv[exp_num]);
+
+		/* append items */
+		Item *item;
+		matches = matchend = NULL;
+		for(item = items; item && item->text; item++) {
+			appenditem(item, &matches, &matchend);
+		}
+
+		lines = MIN(lines, m);
+		curr = sel = matches;
 
 		/* remove tailing star */
 		if(filestart[p] =='*') {
