@@ -6,6 +6,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <wordexp.h>
+#include <sys/stat.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
@@ -37,6 +38,7 @@ static void matchfile(char *filestart);
 static size_t nextrune(int inc);
 static void paste(void);
 static void readstdin(void);
+static void adddirslash(char *path);
 static void run(void);
 static void setup(void);
 static void usage(void);
@@ -60,6 +62,7 @@ static DC *dc;
 static Item *items = NULL;
 static Item *matches, *matchend;
 static Item *prev, *curr, *next, *sel;
+static Bool pathExpansion = False;
 static Window win;
 static XIC xic;
 
@@ -360,7 +363,11 @@ keypress(XKeyEvent *ev) {
 		break;
 	case XK_Return:
 	case XK_KP_Enter:
-		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
+		if(pathExpansion) {
+			puts(strcat(text, sel->text));
+		} else {
+			puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
+		}
 		exit(EXIT_SUCCESS);
 	case XK_Right:
 		if(text[cursor] != '\0') {
@@ -378,13 +385,21 @@ keypress(XKeyEvent *ev) {
 		break;
 	case XK_Tab:
 		if( strchr(text, ' ')!=NULL ) {
+			pathExpansion = True;
 			FILE *f=fopen("/tmp/dmenu.log", "a");
-			fprintf(f,"input: %s\n", text);
+			fprintf(f, "input: %s\n", text);
+			if(sel && strchr(text, '/')!=NULL ) {
+				text[strrchr(text, '/')-text+1] = '\0';
+				strcpy(text, strcat(text, sel->text));
+				adddirslash(strchr(text, ' ')+1);
+			}
 			matchfile( strchr(text, ' ')+1 );
 			fprintf(f, "completed input: %s\n", text);
 			cursor = strlen(text);
 			fclose(f);
 			break;
+		} else {
+			pathExpansion = False;
 		}
 		if(!sel)
 			return;
@@ -477,13 +492,17 @@ paste(void) {
 void
 matchfile(char *filestart) {
 	wordexp_t exp;
-	int i, j, k, p=strlen(filestart);
-	int star_ocurred = 0;
+	int i, j, p=strlen(filestart);
 	filestart[ p+1 ] = 0;
 	filestart[ p ] = '*';
 
 	wordexp(filestart, &exp, 0);
 	size_t hits = exp.we_wordc;
+
+	/* remove tailing star */
+	if(filestart[p] =='*') {
+		filestart[p]='\0';
+	}
 
 	/* debug output */
 	FILE *f=fopen("/tmp/dmenu.log", "a");
@@ -501,6 +520,8 @@ matchfile(char *filestart) {
 				exp_num++;
 				hits = hits-1;
 			} else {
+				/* ignore complete matches */
+				if(strcmp(exp.we_wordv[i], filestart) == 0) continue;
 				fprintf(f, "- %s\n", exp.we_wordv[i]);
 
 				/* add match as item */
@@ -513,6 +534,18 @@ matchfile(char *filestart) {
 				memmove(items[m].text, strrchr(items[m].text, '/')+1, strlen(items[m].text));
 				m++;
 			}
+		}
+		/* expand unambigous match without suggestions */
+		if(m == 1) {
+			/* remove suggestion */
+			items[m-1].text = NULL;
+
+			/* expand it */
+			for(j=0,i=0; exp.we_wordv[exp_num][i]!=0; i++,j++) {
+				if( exp.we_wordv[exp_num][i]==' ' ) filestart[j++]='\\';
+				filestart[j]=exp.we_wordv[exp_num][i];
+			}
+			filestart[j]=0;
 		}
 		if(items)
 			items[m].text = NULL;
@@ -529,41 +562,30 @@ matchfile(char *filestart) {
 		lines = MIN(lines, m);
 		curr = sel = matches;
 
-		/* remove tailing star */
-		if(filestart[p] =='*') {
-			filestart[p]='\0';
-			star_ocurred = 1;
-		}
-
 		/* return if there are no more matches */
 		if(exp_num >= exp.we_wordc) return;
 
-		for(j=0,i=0; exp.we_wordv[exp_num][i]!=0; i++,j++) {
-			if( exp.we_wordv[exp_num][i]==' ' ) filestart[j++]='\\';
-			filestart[j]=exp.we_wordv[exp_num][i];
-		}
-		filestart[j]=0;
-
-		for(k=1; k<exp.we_wordc; k++)  // comment this block for first-completion
-			for(j=0, i=0; exp.we_wordv[k][i]; i++,j++) {
-				if( filestart[j]=='\\' ) j++;
-				if( filestart[j]!=exp.we_wordv[k][i] ) {
-					filestart[j]=0;
-					break;
-				}
-			}
-
-		/* add tailing slash if file matches were found */
-		if(hits == 1 && filestart[j-1]!='/' && star_ocurred) {
-			filestart[j]='/';
-			filestart[j+1]='\0';
-		}
+		adddirslash(filestart);
 
 	} else {
 		filestart[ p ] = 0;
 	}
 	wordfree(&exp);
 	fclose(f);
+}
+
+void
+adddirslash(char *path) {
+	/* add tailing slash if file matches were found */
+	struct stat s;
+	int len = strlen(path);
+
+	if(path[len-1]!='/' && stat(path, &s) == 0) {
+		if(s.st_mode & S_IFDIR) {
+			path[len]='/';
+			path[len+1]='\0';
+		}
+	}
 }
 
 void

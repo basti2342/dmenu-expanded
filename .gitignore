@@ -1,0 +1,4 @@
+config.mk
+dmenu
+stest
+*.o
